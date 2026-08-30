@@ -1,0 +1,20 @@
+# Web Scraping
+requests==2.32.3
+beautifulsoup4==4.13.4
+
+# Data Processing
+python-dateutil==2.9.0.post0
+
+# Image Generation
+Pillow==11.3.0
+
+# Scheduling
+schedule==1.2.2
+
+# Development & Testing
+pytest==8.4.1
+python-dotenv==1.1.1
+
+# Code Quality
+black==25.1.0
+flake8==7.2.0
