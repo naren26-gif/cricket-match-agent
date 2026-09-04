@@ -1,21 +1,19 @@
 """
-Web scraper for ESPNCricinfo
-Fetches international cricket match schedules
-Implements BeautifulSoup (fast) → Playwright (fallback) hybrid approach
+Cricket match data client for CricketData.org (CricAPI)
+Fetches international cricket match schedules via JSON API
 """
 
 import time
-import json
 from typing import List, Optional
 from datetime import datetime
-from urllib.parse import urljoin
 
 import requests
-from bs4 import BeautifulSoup
 
 from config.settings import (
-    ESPN_SCHEDULE_URL,
-    HEADERS,
+    CRICAPI_KEY,
+    CRICAPI_MATCHES_URL,
+    CRICAPI_CURRENT_MATCHES_URL,
+    MAX_PAGES_TO_FETCH,
     REQUEST_TIMEOUT,
     REQUEST_RETRY_ATTEMPTS,
     REQUEST_DELAY,
@@ -26,212 +24,164 @@ from src.logger_setup import setup_logger
 logger = setup_logger(__name__)
 
 
-class ESPNCricketScraper:
+class CricApiScraper:
     """
-    Scraper for ESPNCricinfo schedule page
-    Handles network requests, retries, and error recovery
+    Client for the CricketData.org (CricAPI) JSON API
+    Handles pagination, retries, and mapping API records to Match objects
     """
-    
+
     def __init__(self):
-        """Initialize the scraper with settings"""
-        self.url = ESPN_SCHEDULE_URL
-        self.headers = HEADERS
+        self.api_key = CRICAPI_KEY
         self.timeout = REQUEST_TIMEOUT
         self.retry_attempts = REQUEST_RETRY_ATTEMPTS
         self.delay = REQUEST_DELAY
-        
-        logger.info(f"ESPNCricket Scraper initialized for URL: {self.url}")
-    
-    def fetch_page(self) -> Optional[str]:
+
+        logger.info("CricApiScraper initialized")
+
+    def _get(self, url: str, params: dict) -> Optional[dict]:
         """
-        Fetch the HTML content of the schedule page
-        Implements retry logic for resilience
-        
+        Make a single GET request with retries, and validate the API's own
+        success/failure status (CricAPI returns HTTP 200 even on failures,
+        e.g. an invalid key or an exhausted daily quota, with the real
+        outcome in the JSON body's "status" field).
+
         Returns:
-            HTML content as string, or None if all retries fail
+            The parsed JSON body on success, or None if the request or the
+            API call itself failed.
         """
         for attempt in range(1, self.retry_attempts + 1):
             try:
-                logger.debug(f"Fetching page (attempt {attempt}/{self.retry_attempts})")
-                
-                response = requests.get(
-                    self.url,
-                    headers=self.headers,
-                    timeout=self.timeout
-                )
-                
-                # Check if request was successful
-                response.raise_for_status()  # Raises HTTPError for bad status codes
-                
-                logger.info(f"Successfully fetched page (status: {response.status_code})")
-                
-                # Respect the server: wait before next request
-                time.sleep(self.delay)
-                
-                return response.text
-            
+                response = requests.get(url, params=params, timeout=self.timeout)
+                response.raise_for_status()
+                data = response.json()
+
+                if data.get("status") == "failure":
+                    logger.error(f"API error: {data.get('reason', 'unknown reason')}")
+                    return None
+
+                return data
+
             except requests.exceptions.Timeout:
                 logger.warning(f"Timeout on attempt {attempt}. Retrying...")
-                time.sleep(2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
-            
+                time.sleep(2 ** attempt)
+
             except requests.exceptions.ConnectionError as e:
                 logger.warning(f"Connection error: {e}. Retrying...")
                 time.sleep(2 ** attempt)
-            
+
             except requests.exceptions.HTTPError as e:
                 logger.error(f"HTTP error: {e}")
-                if response.status_code == 403:
-                    logger.error("Access forbidden. May need IP rotation or retry later.")
                 return None
-            
+
             except Exception as e:
                 logger.error(f"Unexpected error: {e}")
                 return None
-        
+
         logger.error("All retry attempts exhausted")
         return None
-    
-    def parse_matches(self, html_content: str) -> List[Match]:
+
+    def _record_to_match(self, record: dict) -> Optional[Match]:
         """
-        Parse HTML content and extract match data
-        
-        Args:
-            html_content: Raw HTML from the schedule page
-        
+        Map a single CricAPI match record to a Match object
+
         Returns:
-            List of Match objects
+            Match object, or None if the record is missing required fields
         """
-        logger.info("Parsing HTML content")
-        matches = []
-        
+        teams = record.get("teams") or []
+        if len(teams) < 2:
+            return None
+
+        match_type = (record.get("matchType") or "").upper()
+        date_time_gmt = record.get("dateTimeGMT")
+        if not date_time_gmt:
+            return None
+
         try:
-            soup = BeautifulSoup(html_content, "html.parser")
-            
-            # ================================================================
-            # IMPORTANT: These CSS selectors need to be updated based on
-            # actual ESPNCricinfo HTML structure.
-            # 
-            # If the website changes its HTML, these selectors will break.
-            # When that happens, inspect the website again (see Part 1)
-            # and update these selectors.
-            # ================================================================
-            
-            # Find all match cards on the page
-            # NOTE: Update this selector based on your inspection!
-            match_cards = soup.find_all("div", class_="card-match")
-            
-            logger.debug(f"Found {len(match_cards)} match cards")
-            
-            for idx, card in enumerate(match_cards, 1):
-                try:
-                    # Extract data from each card
-                    # NOTE: These selectors need adjustment for actual HTML
-                    
-                    match_id = card.get("data-match-id", f"match_{idx}")
-                    
-                    date_elem = card.find("div", class_="date-time")
-                    date_str = date_elem.get_text(strip=True) if date_elem else "N/A"
-                    
-                    teams_elem = card.find("div", class_="teams")
-                    teams_text = teams_elem.get_text(strip=True) if teams_elem else "N/A vs N/A"
-                    
-                    format_elem = card.find("span", class_="format")
-                    format_str = format_elem.get_text(strip=True) if format_elem else "Unknown"
-                    
-                    venue_elem = card.find("div", class_="venue")
-                    venue = venue_elem.get_text(strip=True) if venue_elem else "TBA"
-                    
-                    status_elem = card.find("div", class_="status")
-                    status = status_elem.get_text(strip=True) if status_elem else "Upcoming"
-                    
-                    # Parse teams (format: "India vs Pakistan")
-                    teams = teams_text.split(" vs ")
-                    home_team = teams[0].strip() if len(teams) > 0 else "Unknown"
-                    away_team = teams[1].strip() if len(teams) > 1 else "Unknown"
-                    
-                    # Parse date and time (you may need to adjust this)
-                    # This is a placeholder; adjust based on actual format
-                    date, time_str = self._parse_datetime(date_str)
-                    
-                    # Create Match object
-                    match = Match(
-                        match_id=str(match_id),
-                        date=date,
-                        time=time_str,
-                        home_team=home_team,
-                        away_team=away_team,
-                        format=format_str,
-                        venue=venue,
-                        status=status
-                    )
-                    
-                    matches.append(match)
-                    logger.debug(f"Parsed match {idx}: {match}")
-                
-                except Exception as e:
-                    logger.warning(f"Error parsing match card {idx}: {e}")
-                    continue
-            
-            logger.info(f"Successfully parsed {len(matches)} matches")
-            return matches
-        
-        except Exception as e:
-            logger.error(f"Error parsing HTML: {e}")
-            return []
-    
-    def _parse_datetime(self, datetime_str: str) -> tuple[str, str]:
-        """
-        Parse date-time string into standardized format
-        
-        Args:
-            datetime_str: Raw datetime string from HTML (e.g., "25 Sep, 2024, 3:00 PM")
-        
-        Returns:
-            Tuple of (date, time) in ISO format
-            date: YYYY-MM-DD
-            time: HH:MM (24-hour format, UTC)
-        
-        Note:
-            This is a placeholder. Adjust parsing logic based on actual format.
-        """
-        try:
-            # Example parsing (adjust based on actual format from ESPNCricinfo)
-            # If format is "25 Sep, 2024, 3:00 PM"
-            dt = datetime.strptime(datetime_str, "%d %b, %Y, %I:%M %p")
-            
-            # Assume times are in UTC (adjust timezone if needed)
-            date = dt.strftime("%Y-%m-%d")
-            time = dt.strftime("%H:%M")
-            
-            return date, time
-        
-        except ValueError as e:
-            logger.warning(f"Could not parse datetime '{datetime_str}': {e}")
-            return "N/A", "N/A"
-    
+            dt = datetime.strptime(date_time_gmt, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            logger.warning(f"Could not parse dateTimeGMT '{date_time_gmt}'")
+            return None
+
+        if record.get("matchEnded"):
+            status = "Completed"
+        elif record.get("matchStarted"):
+            status = "Live"
+        else:
+            status = "Upcoming"
+
+        # The API's "name" field is formatted like:
+        # "England vs Pakistan, 3rd Test, Pakistan tour of England 2026"
+        # The competition is everything after the last comma.
+        name_parts = (record.get("name") or "").split(",")
+        competition = name_parts[-1].strip() if name_parts else ""
+
+        return Match(
+            match_id=str(record.get("id", "")),
+            date=dt.strftime("%Y-%m-%d"),
+            time=dt.strftime("%H:%M"),
+            home_team=teams[0],
+            away_team=teams[1],
+            format=match_type,
+            venue=record.get("venue", "TBA"),
+            status=status,
+            competition=competition,
+        )
+
     def fetch_all_matches(self) -> List[Match]:
         """
-        Main entry point: fetch and parse all matches
-        
+        Main entry point: fetch matches from the API and map them to
+        Match objects. Combines the "currently happening" feed with a
+        bounded number of pages from the general matches feed.
+
         Returns:
-            List of Match objects
+            List of Match objects (unfiltered - see parser.py for
+            international/date-range filtering)
         """
         logger.info("=" * 60)
-        logger.info("SCRAPING STARTED")
+        logger.info("FETCHING STARTED")
         logger.info("=" * 60)
-        
-        html = self.fetch_page()
-        
-        if html is None:
-            logger.error("Failed to fetch page. Returning empty list.")
+
+        if not self.api_key:
+            logger.error(
+                "CRICAPI_KEY is not set. Add it to a local .env file "
+                "(CRICAPI_KEY=...) or pass it as an environment variable."
+            )
             return []
-        
-        matches = self.parse_matches(html)
-        
+
+        matches: List[Match] = []
+
+        current = self._get(
+            CRICAPI_CURRENT_MATCHES_URL, {"apikey": self.api_key, "offset": 0}
+        )
+        if current:
+            for record in current.get("data", []):
+                match = self._record_to_match(record)
+                if match:
+                    matches.append(match)
+            time.sleep(self.delay)
+
+        for page in range(MAX_PAGES_TO_FETCH):
+            offset = page * 25
+            data = self._get(
+                CRICAPI_MATCHES_URL, {"apikey": self.api_key, "offset": offset}
+            )
+            if not data:
+                break
+
+            for record in data.get("data", []):
+                match = self._record_to_match(record)
+                if match:
+                    matches.append(match)
+
+            if offset + 25 >= data.get("info", {}).get("totalRows", 0):
+                break
+
+            time.sleep(self.delay)
+
         logger.info("=" * 60)
-        logger.info(f"SCRAPING COMPLETE: Found {len(matches)} matches")
+        logger.info(f"FETCHING COMPLETE: Found {len(matches)} matches")
         logger.info("=" * 60)
-        
+
         return matches
 
 
@@ -241,25 +191,25 @@ class ESPNCricketScraper:
 
 def fetch_matches() -> List[Match]:
     """
-    Fetch all international cricket matches from ESPNCricinfo
-    
+    Fetch all cricket matches from CricketData.org (unfiltered)
+
     Returns:
         List of Match objects
-    
+
     Example:
         matches = fetch_matches()
         for match in matches:
             print(match.home_team, "vs", match.away_team)
     """
-    scraper = ESPNCricketScraper()
+    scraper = CricApiScraper()
     return scraper.fetch_all_matches()
 
 
 if __name__ == "__main__":
     # Test the scraper directly
-    print("Testing ESPNCricket Scraper...")
+    print("Testing CricApiScraper...")
     matches = fetch_matches()
-    
+
     print(f"\nFound {len(matches)} matches:")
     for match in matches[:5]:  # Print first 5
         print(f"  {match}")

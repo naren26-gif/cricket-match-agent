@@ -13,25 +13,29 @@ class Match:
     Represents a single cricket match
     
     Attributes:
-        match_id: Unique identifier (string or int from ESPNCricinfo)
+        match_id: Unique identifier (from the data provider)
         date: Match date (ISO format: 2024-09-25)
         time: Match time in UTC (ISO format: 15:30:00)
         home_team: Team playing at home (string)
         away_team: Visiting team (string)
-        format: Match format (TEST, ODI, T20I, T20L)
+        format: Match format (TEST, ODI, T20)
         venue: Stadium name (string)
         status: Match status (Upcoming, Live, Completed)
+        competition: Series/tournament name (e.g. "India tour of Australia
+            2026" or "Indian Premier League 2026") - used to distinguish
+            international matches and major leagues from domestic cricket
     """
-    
+
     match_id: str
     date: str  # Format: YYYY-MM-DD
     time: str  # Format: HH:MM (UTC)
     home_team: str
     away_team: str
-    format: str  # TEST, ODI, T20I, T20L, or league names
+    format: str  # TEST, ODI, T20
     venue: str
     status: str  # Upcoming, Live, Completed
-    
+    competition: str
+
     def __repr__(self):
         """Human-readable representation"""
         return f"{self.home_team} vs {self.away_team} ({self.format}) - {self.date} {self.time}"
@@ -46,5 +50,6 @@ class Match:
 #     away_team="Pakistan",
 #     format="ODI",
 #     venue="Lahore Stadium",
-#     status="Upcoming"
+#     status="Upcoming",
+#     competition="Pakistan tour of India 2024"
 # )

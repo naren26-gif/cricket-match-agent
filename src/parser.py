@@ -6,7 +6,7 @@ Cleans, validates, and filters match data
 from typing import List
 from datetime import datetime
 
-from config.settings import ALLOWED_FORMATS, EXCLUDE_KEYWORDS, DAYS_AHEAD
+from config.settings import ALLOWED_FORMATS, ALLOWED_LEAGUES, EXCLUDE_KEYWORDS, DAYS_AHEAD
 from src.models import Match
 from src.logger_setup import setup_logger
 
@@ -22,9 +22,10 @@ class MatchFilter:
     def __init__(self):
         """Initialize the filter with settings"""
         self.allowed_formats = ALLOWED_FORMATS
+        self.allowed_leagues = ALLOWED_LEAGUES
         self.exclude_keywords = EXCLUDE_KEYWORDS
         self.days_ahead = DAYS_AHEAD
-        
+
         logger.info("MatchFilter initialized")
     
     def is_international_format(self, format_str: str) -> bool:
@@ -47,24 +48,41 @@ class MatchFilter:
         
         return False
     
-    def is_international_venue(self, venue: str) -> bool:
+    def is_international_scope(self, match: Match) -> bool:
         """
-        Check if venue suggests domestic/county cricket (should be excluded)
-        
+        Check if a match is in scope: international (Test/ODI/T20I) or a
+        major T20 league, and not women's/youth/domestic cricket.
+
         Args:
-            venue: Venue name
-        
+            match: Match object (uses competition, home_team, away_team)
+
         Returns:
-            True if international, False if domestic
+            True if in scope, False otherwise
         """
-        venue_lower = venue.lower()
-        
-        # If venue contains excluded keywords, it's not international
+        haystack = f"{match.competition} {match.home_team} {match.away_team}".lower()
+
+        # Reject women's, youth, domestic first-class/List A, warm-ups, etc.
         for keyword in self.exclude_keywords:
-            if keyword.lower() in venue_lower:
-                logger.debug(f"Excluding venue '{venue}' (contains '{keyword}')")
+            if keyword.lower() in haystack:
+                logger.debug(f"Excluding '{match.competition}' (contains '{keyword}')")
                 return False
-        
+
+        # Test/ODI matches that survive the exclude list are international
+        if match.format.upper() in ("TEST", "ODI"):
+            return True
+
+        # T20 matches must be either a recognized major league, or a
+        # bilateral international tour, to be considered in scope
+        competition_lower = match.competition.lower()
+        is_major_league = any(
+            league.lower() in competition_lower for league in self.allowed_leagues
+        )
+        is_bilateral_tour = "tour of" in competition_lower
+
+        if not (is_major_league or is_bilateral_tour):
+            logger.debug(f"Excluding domestic T20 league '{match.competition}'")
+            return False
+
         return True
     
     def is_within_date_range(self, date_str: str) -> bool:
@@ -106,10 +124,10 @@ class MatchFilter:
         if not self.is_international_format(match.format):
             logger.debug(f"Rejecting match (format): {match}")
             return False
-        
-        # Check venue
-        if not self.is_international_venue(match.venue):
-            logger.debug(f"Rejecting match (venue): {match}")
+
+        # Check international/major-league scope
+        if not self.is_international_scope(match):
+            logger.debug(f"Rejecting match (scope): {match}")
             return False
         
         # Check date range
@@ -223,13 +241,15 @@ if __name__ == "__main__":
     test_matches = [
         Match(
             match_id="1", date="2024-09-25", time="15:30",
-            home_team="India", away_team="Pakistan", 
-            format="ODI", venue="Lahore", status="Upcoming"
+            home_team="India", away_team="Pakistan",
+            format="ODI", venue="Lahore", status="Upcoming",
+            competition="Pakistan tour of India 2024"
         ),
         Match(
             match_id="2", date="2024-09-26", time="09:00",
             home_team="England", away_team="West Indies",
-            format="Test", venue="Old Trafford", status="Upcoming"
+            format="Test", venue="Old Trafford", status="Upcoming",
+            competition="West Indies tour of England 2024"
         ),
     ]
     

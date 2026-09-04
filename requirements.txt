@@ -1,6 +1,5 @@
-# Web Scraping
+# Data Fetching
 requests==2.32.3
-beautifulsoup4==4.13.4
 
 # Data Processing
 python-dateutil==2.9.0.post0

@@ -17,15 +17,15 @@ logger = setup_logger(__name__)
 def main():
     """
     Main workflow:
-    1. Fetch matches from ESPNCricinfo
+    1. Fetch matches from CricketData.org
     2. Filter for international matches only
     3. Save to JSON file
     """
     
     logger.info("🏏 Cricket Match Agent Starting...")
     
-    # Step 1: Scrape matches from ESPNCricinfo
-    logger.info("Step 1: Fetching matches from ESPNCricinfo...")
+    # Step 1: Fetch matches from CricketData.org
+    logger.info("Step 1: Fetching matches from CricketData.org...")
     raw_matches = fetch_matches()
     
     if not raw_matches:

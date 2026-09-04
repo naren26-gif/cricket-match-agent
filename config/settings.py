@@ -5,6 +5,7 @@ Central place for all constants, URLs, and settings
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # ============================================================================
 # PROJECT PATHS
@@ -20,24 +21,31 @@ LOG_DIR = PROJECT_ROOT / "logs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
 
+# Load secrets (e.g. CRICAPI_KEY) from a local .env file, if present.
+# In Docker/CI, the key is instead injected as a real environment variable
+# (e.g. `docker run -e CRICAPI_KEY=...`), so a missing .env file is fine.
+load_dotenv(PROJECT_ROOT / ".env")
+
 
 # ============================================================================
 # WEBSITE & API CONFIGURATION
 # ============================================================================
 
-# ESPNCricinfo URLs
-ESPN_BASE_URL = "https://www.espncricinfo.com"
-ESPN_SCHEDULE_URL = f"{ESPN_BASE_URL}/schedule"
+# CricketData.org (formerly CricAPI) - JSON API for cricket fixtures.
+# ESPNCricinfo was dropped as a source: it sits behind Akamai's WAF/Bot
+# Manager, which blocks plain HTTP requests outright (403) and serves stale
+# archived content even when a full browser header set gets past the WAF.
+CRICAPI_BASE_URL = "https://api.cricapi.com/v1"
+CRICAPI_KEY = os.getenv("CRICAPI_KEY")
+CRICAPI_MATCHES_URL = f"{CRICAPI_BASE_URL}/matches"
+CRICAPI_CURRENT_MATCHES_URL = f"{CRICAPI_BASE_URL}/currentMatches"
 
-# Headers to mimic a real browser
-# Prevents being blocked as a "bot"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Referer": ESPN_BASE_URL,
-    "Connection": "keep-alive",
-}
+# The /matches endpoint returns 25 matches per page, ordered by recent
+# activity (not strictly chronological), mixing recently completed and
+# upcoming fixtures across ALL series. We page through a bounded number of
+# pages and keep only what falls in our date window - this bounds API hits
+# (free tier: 100/day) while still catching near-term matches.
+MAX_PAGES_TO_FETCH = 8
 
 
 # ============================================================================
@@ -47,17 +55,38 @@ HEADERS = {
 # Request timing
 REQUEST_TIMEOUT = 10  # seconds - how long to wait for response
 REQUEST_RETRY_ATTEMPTS = 3  # how many times to retry on failure
-REQUEST_DELAY = 2  # seconds between requests (be respectful to the server)
+REQUEST_DELAY = 2  # seconds between requests (be respectful to the API)
 
-# Playwright settings (for JS-rendered pages)
-PLAYWRIGHT_HEADLESS = True  # Don't show browser window
-PLAYWRIGHT_TIMEOUT = 15000  # milliseconds
+# Match formats to include (matches CricAPI's lowercase `matchType` values:
+# "test", "odi", "t20" - compared case-insensitively)
+ALLOWED_FORMATS = ["TEST", "ODI", "T20"]
 
-# Match formats to include
-ALLOWED_FORMATS = ["TEST", "ODI", "T20I", "T20L"]  # T20L = T20 League
+# Major T20 leagues to include (checked against the match's competition/
+# series name). Any T20 match NOT in this list and NOT a bilateral
+# international ("<Country> tour of <Country>") is treated as a domestic
+# league and excluded, per project scope.
+ALLOWED_LEAGUES = [
+    "Indian Premier League",
+    "Big Bash League",
+    "Caribbean Premier League",
+    "Pakistan Super League",
+    "Bangladesh Premier League",
+    "Lanka Premier League",
+    "SA20",
+    "ILT20",
+    "Major League Cricket",
+    "The Hundred",
+]
 
-# Exclude these keywords in venue names (for filtering out club/county cricket)
-EXCLUDE_KEYWORDS = ["County", "Domestic", "Provincial", "Club", "Domestic First-Class"]
+# Keywords that, if found in the competition/series name or team names,
+# exclude a match regardless of format (women's, youth, domestic
+# first-class/List A tournaments, warm-up/practice games, "A" tours).
+EXCLUDE_KEYWORDS = [
+    "Women", "County", "Domestic", "Provincial", "Club",
+    "Ranji", "Vijay Hazare", "Syed Mushtaq Ali", "Duleep", "Irani",
+    "Buchi Babu", "U19", "Under-19", "Warm-up", "Practice Match",
+    "Emerging", "Development", " A tour", "'A' team",
+]
 
 
 # ============================================================================

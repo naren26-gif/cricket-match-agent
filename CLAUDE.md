@@ -111,33 +111,65 @@ Match:
 ## Current status
 _Last updated: 2026-09-04._
 
-Phase 1 (repo/folder structure) and most of Phase 2 (scraper + parser +
-data model) are done:
-- `src/models.py` — `Match` data model
-- `src/scraper.py` — `ESPNCricketScraper` (requests + BeautifulSoup, retry
-  with exponential backoff). **CSS selectors in `parse_matches` /
-  `_parse_datetime` are placeholders** — they were written before
-  inspecting the real ESPNCricinfo HTML and need to be verified/updated
-  against the live page before this can scrape real data.
-- `src/parser.py` — `MatchFilter` / `filter_international_matches`
-  (dedupe, format/venue/date-range filtering, sort)
-- `src/logger_setup.py`, `src/utils.py`, `config/settings.py` — done
-- `main.py` — orchestrates scrape → filter → save to `output/matches.json`
-- `tests/` — `test_scraper.py`, `test_espn_scrape_output.py` exist
-- `src/Dockerfile` + root `.dockerignore` — containerization done (note:
-  Dockerfile lives in `src/`, not the repo root — build context needs
-  `-f src/Dockerfile .` from the root, since it `COPY . .`)
+**Data source changed: ESPNCricinfo scraping abandoned, replaced with the
+CricketData.org (CricAPI) JSON API.** ESPNCricinfo sits behind Akamai's
+WAF/Bot Manager — plain HTTP requests get a `403 Access Denied` outright,
+and even a full realistic browser header set only gets redirected to a
+dead legacy domain (stale 2007-era archive content), not real fixtures.
+Headless-browser (Playwright) bypass was considered but not pursued —
+this sandbox lacks the sudo access needed to install Chromium's system
+libraries, and it would still be uncertain against Bot Manager. Pivoted
+to CricketData.org instead: a documented, free-tier (100 req/day) JSON
+API, confirmed working end-to-end (including a real Docker run).
+
+Phase 1 (repo/folder structure) and Phase 2 (scraper + parser + data
+model) are done:
+- `src/models.py` — `Match` data model. Added a `competition` field
+  (series/tournament name, e.g. "Pakistan tour of England 2026" or
+  "Indian Premier League 2026") — needed to tell international matches
+  and major leagues apart from domestic cricket, since CricAPI's format
+  field alone (test/odi/t20) doesn't carry that distinction.
+- `src/scraper.py` — `CricApiScraper` (was `ESPNCricketScraper`). Calls
+  `/v1/currentMatches` + paginates `/v1/matches` (bounded by
+  `MAX_PAGES_TO_FETCH`, default 8 pages), maps records to `Match` objects.
+  Note: CricAPI returns HTTP 200 even on failures (bad key, quota
+  exhausted) with the real outcome in the JSON body's `status` field —
+  `_get()` checks that explicitly rather than trusting the HTTP status.
+- `src/parser.py` — `MatchFilter` / `filter_international_matches`.
+  Replaced the old venue-keyword check with `is_international_scope()`:
+  Test/ODI matches pass once they clear `EXCLUDE_KEYWORDS` (women's,
+  youth, domestic first-class/List A, warm-ups); T20 matches additionally
+  need to match `ALLOWED_LEAGUES` (IPL/BBL/CPL/PSL/etc.) or contain
+  "tour of" (bilateral international) — otherwise they're treated as a
+  domestic T20 league and excluded.
+- `config/settings.py` — `CRICAPI_KEY` loaded via `python-dotenv` from a
+  local `.env` (gitignored; already present, key already provisioned).
+  Docker/CI must inject it as a real env var instead (e.g.
+  `docker run --env-file .env ...`) since `.env` isn't copied into the
+  image (`.dockerignore` excludes it).
+- `.vscode/settings.json` — added `python.envFile` +
+  `python.terminal.activateEnvironment` so the integrated terminal/
+  debugger auto-load `.env`.
+- `src/logger_setup.py`, `src/utils.py` — done (`utils.py` still empty)
+- `main.py` — orchestrates fetch → filter → save to `output/matches.json`
+- `tests/` — `test_scraper.py` (updated for the new `Match`/filter shape),
+  `test_cricapi_scrape_output.py` (was `test_espn_scrape_output.py`,
+  rewritten against sample CricAPI-shaped records instead of ESPN HTML)
+- `requirements.txt` — dropped `beautifulsoup4` (no HTML parsing anymore)
+- `src/Dockerfile` + root `.dockerignore` — containerization done, rebuilt
+  and verified with the new scraper (note: Dockerfile lives in `src/`, not
+  the repo root — build context needs `-f src/Dockerfile .` from the root,
+  since it `COPY . .`)
 
 Not started yet:
 - `src/image_generator.py` — **empty file**, Phase 3 not begun (landscape
   1200×628 + square 1080×1080 templates)
 - GitHub Actions weekly cron workflow (`.github/workflows/weekly-scrape.yml`)
+  — will need `CRICAPI_KEY` added as a repo secret
 - Manual/automated social upload workflow
-- No `.env` / secrets handling yet (not needed until social API integration)
 
-Next logical action: verify real ESPNCricinfo HTML structure and fix the
-placeholder selectors in `src/scraper.py`, since nothing downstream can be
-validated against real data until that's correct.
+Next logical action: build `src/image_generator.py` (Phase 3) now that
+`output/matches.json` is populated with real data end-to-end.
 
 ## Standing instructions from the user
 _Append new durable instructions here, most recent first, as they're given
