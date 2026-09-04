@@ -4,19 +4,35 @@
 > reads it automatically on every session in this folder, so it always has
 > this context without being re-explained.
 >
-> **Standing rule for Claude Code:** treat this file as the single source of
+> **Standing rule for Claude Code:** treat this file (plus the files it
+> imports and the nested `CLAUDE.md` files below) as the single source of
 > truth for this project. Read it at the start of every session. Whenever
 > the user gives an instruction meant to apply beyond the current message
-> (a preference, a scope rule, a "always/never do X"), add it to
+> (a preference, a scope rule, an "always/never do X"), add it to
 > "Standing instructions from the user" below instead of letting it live
 > only in chat history. Keep "Current status" up to date as work lands.
 
-## Who's building this
-The user is new to Linux/Unix environments and Claude Code / CLI tooling.
-**Always explain setup steps and commands in plain language, 2-3 lines of
-reasoning per step, before running them** — treat this like onboarding a
-new joiner, not a peer engineer. Don't assume familiarity with git, venvs,
-shells, or cron syntax; explain briefly what each does the first time it's used.
+@OWNERS.md
+
+@ARCHITECTURE.md
+
+## Where things live
+This project splits guidance across path-scoped files instead of one long
+document:
+
+- **`OWNERS.md`** (imported above) — who's building this, communication
+  style.
+- **`ARCHITECTURE.md`** (imported above) — pipeline, repo structure, build
+  order phases, live GitHub Actions workflows.
+- **`src/CLAUDE.md`** — tech stack, data model, image spec, scraper
+  operational notes. Auto-loaded whenever Claude Code works on files
+  under `src/`.
+- **`config/CLAUDE.md`** — settings/secrets handling. Auto-loaded under
+  `config/`.
+- **`tests/CLAUDE.md`** — testing conventions. Auto-loaded under `tests/`.
+
+This file itself stays a short index: Objective, Current status, and
+Standing instructions (below), which change often and apply project-wide.
 
 ## Objective
 Automate weekly collection of international cricket matches from
@@ -27,86 +43,6 @@ square for Instagram). Runs weekly, recommended Tuesday 10:00 AM UTC.
 leagues (IPL, BBL, CPL, etc.). Exclude county/club cricket, domestic
 leagues (unless specified), youth cricket, and women's cricket (unless
 explicitly requested).
-
-## Architecture (pipeline)
-```
-Scheduled Trigger (GitHub Actions cron)
-        ↓
-Web Scraper (ESPNCricinfo schedule pages)
-        ↓
-Data Parser & Filter (international matches only)
-        ↓
-Image Generator (PIL/Pillow)
-        ↓
-Store image in repo /output/
-        ↓
-Manual upload to X & Instagram (MVP) → API integration later
-```
-
-## Repo structure to scaffold (Phase 1)
-```
-cricket-match-agent/
-├── src/
-│   ├── scraper.py          # ESPNCricinfo web scraper
-│   ├── parser.py           # data parsing & filtering
-│   ├── image_generator.py  # image creation
-│   └── utils.py            # helper functions
-├── output/                 # weekly generated images
-├── config/
-│   └── settings.py         # URLs, constants, config
-├── tests/                  # unit tests
-├── requirements.txt
-├── README.md
-├── .gitignore              # venv/, __pycache__/, .env, output/
-└── .github/
-    └── workflows/
-        └── weekly-scrape.yml
-```
-
-## Tech stack
-- Python 3.10+
-- Scraping: `requests`, `beautifulsoup4`, `selenium` or `playwright`, `lxml`
-- Parsing: `python-dateutil`, optional `pandas`
-- Images: `Pillow` (primary), `reportlab` (alt)
-- Scheduling: GitHub Actions cron (primary), `schedule`/`APScheduler` as local fallback
-- Future: `tweepy` (X API), `python-dotenv` for secrets
-- Testing/quality: `pytest`, `pytest-mock`, `black`, `flake8`, `pylint`
-
-## Data model
-```python
-Match:
-  match_id: str        # unique identifier
-  date: str            # ISO format
-  time: str            # UTC
-  home_team: str
-  away_team: str
-  format: str          # TEST / ODI / T20I
-  venue: str
-  status: str          # upcoming / scheduled / live
-```
-
-## Image spec
-- Landscape 1200×628px (X), Square 1080×1080px (Instagram) — generate both.
-- Show 5-7 key matches: date, teams, format badge (color-coded: Test=Blue,
-  ODI=Green, T20=Red), venue, time (UTC).
-- Filename convention: `cricket_matches_week_XX_landscape.png` / `_square.png`.
-
-## Key operational notes
-- Check `robots.txt` at espncricinfo.com before scraping; throttle requests
-  2-3 seconds apart; rotate user-agents.
-- Store all times in UTC; let viewers interpret locally.
-- Manual upload to social media is the MVP — no auto-posting API yet.
-- GitHub Actions free tier (2,000 min/month) is more than sufficient for a
-  weekly job.
-
-## Build order (phases)
-1. Repo + venv + folder structure + git (this session's starting point)
-2. Scraper + parser + data model
-3. Image generator (landscape + square templates)
-4. GitHub Actions automation (weekly cron)
-5. Manual social upload workflow (API integration later, optional)
-6. Tests (unit + integration, target >80% coverage)
-7. Deploy + monitor
 
 ## Current status
 _Last updated: 2026-09-04._
@@ -122,19 +58,12 @@ libraries, and it would still be uncertain against Bot Manager. Pivoted
 to CricketData.org instead: a documented, free-tier (100 req/day) JSON
 API, confirmed working end-to-end (including a real Docker run).
 
-Phase 1 (repo/folder structure) and Phase 2 (scraper + parser + data
-model) are done:
-- `src/models.py` — `Match` data model. Added a `competition` field
-  (series/tournament name, e.g. "Pakistan tour of England 2026" or
-  "Indian Premier League 2026") — needed to tell international matches
-  and major leagues apart from domestic cricket, since CricAPI's format
-  field alone (test/odi/t20) doesn't carry that distinction.
+Phase 1 (repo/folder structure), Phase 2 (scraper + parser + data model),
+and Phase 4 (GitHub Actions automation) are done:
+- `src/models.py` — `Match` data model (full shape in `src/CLAUDE.md`).
 - `src/scraper.py` — `CricApiScraper` (was `ESPNCricketScraper`). Calls
   `/v1/currentMatches` + paginates `/v1/matches` (bounded by
   `MAX_PAGES_TO_FETCH`, default 8 pages), maps records to `Match` objects.
-  Note: CricAPI returns HTTP 200 even on failures (bad key, quota
-  exhausted) with the real outcome in the JSON body's `status` field —
-  `_get()` checks that explicitly rather than trusting the HTTP status.
 - `src/parser.py` — `MatchFilter` / `filter_international_matches`.
   Replaced the old venue-keyword check with `is_international_scope()`:
   Test/ODI matches pass once they clear `EXCLUDE_KEYWORDS` (women's,
@@ -142,31 +71,27 @@ model) are done:
   need to match `ALLOWED_LEAGUES` (IPL/BBL/CPL/PSL/etc.) or contain
   "tour of" (bilateral international) — otherwise they're treated as a
   domestic T20 league and excluded.
-- `config/settings.py` — `CRICAPI_KEY` loaded via `python-dotenv` from a
-  local `.env` (gitignored; already present, key already provisioned).
-  Docker/CI must inject it as a real env var instead (e.g.
-  `docker run --env-file .env ...`) since `.env` isn't copied into the
-  image (`.dockerignore` excludes it).
+- `config/settings.py` — see `config/CLAUDE.md` for secrets handling.
 - `.vscode/settings.json` — added `python.envFile` +
   `python.terminal.activateEnvironment` so the integrated terminal/
   debugger auto-load `.env`.
 - `src/logger_setup.py`, `src/utils.py` — done (`utils.py` still empty)
 - `main.py` — orchestrates fetch → filter → save to `output/matches.json`
-- `tests/` — `test_scraper.py` (updated for the new `Match`/filter shape),
-  `test_cricapi_scrape_output.py` (was `test_espn_scrape_output.py`,
-  rewritten against sample CricAPI-shaped records instead of ESPN HTML)
+- `tests/` — see `tests/CLAUDE.md` for current test files and conventions
 - `requirements.txt` — dropped `beautifulsoup4` (no HTML parsing anymore)
 - `src/Dockerfile` + root `.dockerignore` — containerization done, rebuilt
   and verified with the new scraper (note: Dockerfile lives in `src/`, not
   the repo root — build context needs `-f src/Dockerfile .` from the root,
   since it `COPY . .`)
+- `.github/workflows/weekly-scrape.yml` + `.github/workflows/ci.yml` —
+  both committed (`78f39a6`). `CRICAPI_KEY` is already added as a repo
+  secret for the weekly workflow. Full details in `ARCHITECTURE.md` →
+  "Automation (live)".
 
 Not started yet:
 - `src/image_generator.py` — **empty file**, Phase 3 not begun (landscape
-  1200×628 + square 1080×1080 templates)
-- GitHub Actions weekly cron workflow (`.github/workflows/weekly-scrape.yml`)
-  — will need `CRICAPI_KEY` added as a repo secret
-- Manual/automated social upload workflow
+  1200×628 + square 1080×1080 templates, spec in `src/CLAUDE.md`)
+- Manual/automated social upload workflow (Phase 5)
 
 Next logical action: build `src/image_generator.py` (Phase 3) now that
 `output/matches.json` is populated with real data end-to-end.
@@ -175,6 +100,12 @@ Next logical action: build `src/image_generator.py` (Phase 3) now that
 _Append new durable instructions here, most recent first, as they're given
 in conversation. Each entry: what to do/avoid, and why if stated._
 
+- (2026-09-04) Reorganized this file into path-scoped files: `OWNERS.md`
+  and `ARCHITECTURE.md` are imported above (always loaded with this file);
+  `src/`, `config/`, and `tests/` each got their own `CLAUDE.md` that
+  Claude Code auto-loads when working in that directory. Keep new
+  directory-specific guidance in the matching nested file rather than
+  growing this root file back out.
 - (2026-09-04) Keep this CLAUDE.md file current and treat it as the record
   of project instructions — update it whenever new standing guidance is
   given, rather than only relying on chat memory.
