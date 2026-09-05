@@ -6,7 +6,14 @@ Cleans, validates, and filters match data
 from typing import List
 from datetime import datetime
 
-from config.settings import ALLOWED_FORMATS, ALLOWED_LEAGUES, EXCLUDE_KEYWORDS, DAYS_AHEAD
+from config.settings import (
+    ALLOWED_FORMATS,
+    ALLOWED_LEAGUES,
+    EXCLUDE_KEYWORDS,
+    DAYS_AHEAD,
+    TOP_15_ODI_NATIONS,
+    NATION_ALIASES,
+)
 from src.models import Match
 from src.logger_setup import setup_logger
 
@@ -25,6 +32,7 @@ class MatchFilter:
         self.allowed_leagues = ALLOWED_LEAGUES
         self.exclude_keywords = EXCLUDE_KEYWORDS
         self.days_ahead = DAYS_AHEAD
+        self.top15_nations = {nation.lower() for nation in TOP_15_ODI_NATIONS}
 
         logger.info("MatchFilter initialized")
     
@@ -85,6 +93,46 @@ class MatchFilter:
 
         return True
     
+    def is_top15_nation_match(self, match: Match) -> bool:
+        """
+        Check that a bilateral/international match is between two of the
+        current top 15 ICC-ranked nations (see TOP_15_ODI_NATIONS).
+
+        Franchise T20 leagues (IPL, BBL, etc.) are exempt from this check:
+        their "teams" are city/franchise sides, not nations, so a ranking
+        filter doesn't apply to them - they're already scoped in via
+        ALLOWED_LEAGUES in is_international_scope().
+
+        Args:
+            match: Match object
+
+        Returns:
+            True if in scope (a recognized major league, or both teams are
+            top-15 nations), False otherwise
+        """
+        competition_lower = match.competition.lower()
+        is_major_league = any(
+            league.lower() in competition_lower for league in self.allowed_leagues
+        )
+        if is_major_league:
+            return True
+
+        def normalize(team: str) -> str:
+            team_clean = team.strip().lower()
+            return NATION_ALIASES.get(team_clean, team_clean)
+
+        home = normalize(match.home_team)
+        away = normalize(match.away_team)
+
+        if home not in self.top15_nations or away not in self.top15_nations:
+            logger.debug(
+                f"Excluding '{match.home_team} vs {match.away_team}' "
+                "(not both top-15 ranked nations)"
+            )
+            return False
+
+        return True
+
     def is_within_date_range(self, date_str: str) -> bool:
         """
         Check if match date is within the next N days
@@ -129,7 +177,12 @@ class MatchFilter:
         if not self.is_international_scope(match):
             logger.debug(f"Rejecting match (scope): {match}")
             return False
-        
+
+        # Check both teams are top-15 ranked nations (skipped for major leagues)
+        if not self.is_top15_nation_match(match):
+            logger.debug(f"Rejecting match (nation ranking): {match}")
+            return False
+
         # Check date range
         if not self.is_within_date_range(match.date):
             logger.debug(f"Rejecting match (date range): {match}")

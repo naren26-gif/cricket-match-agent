@@ -4,6 +4,7 @@ Unit tests for the image generator (Phase 3)
 
 import json
 import re
+from datetime import datetime, timedelta, timezone
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -19,10 +20,14 @@ from src.image_generator import (
 )
 
 
+def _in_days(n):
+    return (datetime.now(timezone.utc).date() + timedelta(days=n)).strftime("%Y-%m-%d")
+
+
 def make_match(**overrides):
     base = {
         "match_id": "1",
-        "date": "2026-09-09",
+        "date": _in_days(4),
         "time": "14:00",
         "home_team": "India",
         "away_team": "Australia",
@@ -37,47 +42,55 @@ def make_match(**overrides):
 class TestSelectFeaturedMatches:
     def test_filters_out_unconfirmed_placeholder_matches(self):
         matches = [
-            make_match(match_id="1", date="2026-09-10"),
-            make_match(match_id="2", date="2026-09-09", home_team="Tbc", away_team="Tbc"),
+            make_match(match_id="1", date=_in_days(1)),
+            make_match(match_id="2", date=_in_days(2), home_team="Tbc", away_team="Tbc"),
         ]
 
-        # min_count=1 so the single confirmed match already satisfies the
-        # floor and the placeholder padding fallback doesn't kick in -
-        # isolates the placeholder-filtering behavior from the padding one.
-        result = select_featured_matches(matches, min_count=1, max_count=5)
+        result = select_featured_matches(matches)
 
         assert [m["match_id"] for m in result] == ["1"]
 
     def test_sorts_chronologically_by_date_then_time(self):
         matches = [
-            make_match(match_id="a", date="2026-09-10", time="10:00"),
-            make_match(match_id="b", date="2026-09-09", time="23:00"),
-            make_match(match_id="c", date="2026-09-09", time="05:00"),
+            make_match(match_id="a", date=_in_days(2), time="10:00"),
+            make_match(match_id="b", date=_in_days(1), time="23:00"),
+            make_match(match_id="c", date=_in_days(1), time="05:00"),
         ]
 
         result = select_featured_matches(matches)
 
         assert [m["match_id"] for m in result] == ["c", "b", "a"]
 
-    def test_caps_at_max_count(self):
-        matches = [make_match(match_id=str(i), date=f"2026-09-{i:02d}") for i in range(1, 11)]
+    def test_excludes_matches_outside_the_days_ahead_window(self):
+        matches = [
+            make_match(match_id="past", date=_in_days(-1)),
+            make_match(match_id="today", date=_in_days(0)),
+            make_match(match_id="in_range", date=_in_days(7)),
+            make_match(match_id="too_far", date=_in_days(8)),
+        ]
 
-        result = select_featured_matches(matches, min_count=5, max_count=7)
+        result = select_featured_matches(matches, days_ahead=7)
+
+        assert [m["match_id"] for m in result] == ["today", "in_range"]
+
+    def test_caps_at_max_count(self):
+        matches = [make_match(match_id=str(i), date=_in_days(i)) for i in range(1, 11)]
+
+        result = select_featured_matches(matches, days_ahead=30, max_count=7)
 
         assert len(result) == 7
 
-    def test_pads_with_placeholders_when_not_enough_confirmed(self):
+    def test_uses_placeholders_when_no_confirmed_matches_in_window(self):
         matches = [
-            make_match(match_id="1", date="2026-09-01"),
-            make_match(match_id="2", date="2026-09-02", home_team="Tbc", away_team="Tbc"),
-            make_match(match_id="3", date="2026-09-03", home_team="Tbc", away_team="Tbc"),
+            make_match(match_id="1", date=_in_days(1), home_team="Tbc", away_team="Tbc"),
+            make_match(match_id="2", date=_in_days(2), home_team="Tbc", away_team="Tbc"),
         ]
 
-        result = select_featured_matches(matches, min_count=2, max_count=5)
+        result = select_featured_matches(matches)
 
-        # Not enough confirmed matches to hit min_count, so placeholders
-        # are used to pad the image out rather than leaving it sparse.
-        assert [m["match_id"] for m in result] == ["1", "2", "3"]
+        # No confirmed matches in the window at all, so placeholders are
+        # used rather than returning an empty image.
+        assert [m["match_id"] for m in result] == ["1", "2"]
 
     def test_empty_input_returns_empty(self):
         assert select_featured_matches([]) == []
@@ -137,7 +150,7 @@ class TestGenerateImages:
 
     def test_creates_correctly_sized_landscape_and_square_png_files(self, tmp_path):
         matches = [
-            make_match(match_id=str(i), date=f"2026-09-{i:02d}", format="TEST" if i == 1 else "T20")
+            make_match(match_id=str(i), date=_in_days(i), format="TEST" if i == 1 else "T20")
             for i in range(1, 6)
         ]
 
@@ -154,7 +167,7 @@ class TestGenerateImages:
             assert img.size == SQUARE_SIZE
 
     def test_filenames_follow_naming_convention(self, tmp_path):
-        matches = [make_match(match_id=str(i), date=f"2026-09-{i:02d}") for i in range(1, 6)]
+        matches = [make_match(match_id=str(i), date=_in_days(i)) for i in range(1, 6)]
 
         landscape_path, square_path = generate_images(matches=matches, output_dir=tmp_path)
 

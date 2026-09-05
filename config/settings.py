@@ -88,6 +88,30 @@ EXCLUDE_KEYWORDS = [
     "Emerging", "Development", " A tour", "'A' team",
 ]
 
+# Top 15 nations per the ICC Men's ODI Team Rankings, snapshotted 2026-09-05
+# (source: https://en.wikipedia.org/wiki/ICC_Men%27s_ODI_Team_Rankings).
+# Applied only to bilateral/international matches (Test/ODI/T20I nation vs
+# nation) - NOT to major T20 franchise leagues (IPL/BBL/etc, see
+# ALLOWED_LEAGUES above), whose "teams" are city/franchise sides rather than
+# nations, so a ranking filter doesn't apply to them.
+#
+# ICC rankings shift after most series, so this list is a manually
+# maintained snapshot, not a live lookup - update it periodically (e.g. from
+# the Wikipedia page above, or https://www.icc-cricket.com/rankings/mens/team-rankings/odi).
+TOP_15_ODI_NATIONS = [
+    "India", "New Zealand", "Australia", "South Africa", "Pakistan",
+    "Sri Lanka", "England", "Afghanistan", "Bangladesh", "West Indies",
+    "Zimbabwe", "Ireland", "Scotland", "Netherlands", "United States",
+]
+
+# Alternate spellings CricAPI (or other sources) may use for a nation in
+# TOP_15_ODI_NATIONS, mapped to the canonical name above (compared
+# case-insensitively).
+NATION_ALIASES = {
+    "usa": "united states",
+    "united states of america": "united states",
+}
+
 
 # ============================================================================
 # DATA STORAGE

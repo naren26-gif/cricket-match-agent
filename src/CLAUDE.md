@@ -35,7 +35,9 @@ Match:
 
 ## Image spec
 - Landscape 1200×628px (X), Square 1080×1080px (Instagram) — generate both.
-- Show 5-7 key matches: date, teams, format badge (color-coded: Test=Blue,
+- Show every match in the next 7 days (see `FEATURED_WINDOW_DAYS` in
+  `image_generator.py`), capped at 15 matches for legibility on the
+  fixed-size image: date, teams, format badge (color-coded: Test=Blue,
   ODI=Green, T20=Red), venue, time (UTC).
 - Filename convention: `cricket_matches_week_XX_landscape.png` / `_square.png`.
 
@@ -47,3 +49,11 @@ Match:
 - CricAPI returns HTTP 200 even on failures (bad key, quota exhausted) with
   the real outcome in the JSON body's `status` field — `_get()` in
   `scraper.py` checks that explicitly rather than trusting the HTTP status.
+- Bilateral/international matches (Test/ODI/T20I nation vs nation) must be
+  between two of the current top 15 ICC-ranked nations
+  (`TOP_15_ODI_NATIONS` in `config/settings.py`) to pass `parser.py`'s
+  filter — see `is_top15_nation_match()`. Franchise T20 leagues (IPL/BBL/
+  etc, via `ALLOWED_LEAGUES`) are exempt, since their teams are city/
+  franchise sides, not nations. The nations list is a manually maintained
+  snapshot (dated in a comment in `settings.py`) of the ICC Men's ODI Team
+  Rankings, not a live lookup — update it periodically as rankings shift.
