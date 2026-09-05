@@ -77,6 +77,37 @@ class TestMatchFilter:
         )
         assert filter_obj.is_international_scope(domestic_first_class) == False
 
+    def test_is_top15_nation_match(self):
+        """Test top-15 ICC-ranked nation validation for bilateral matches"""
+        filter_obj = MatchFilter()
+
+        top15_vs_top15 = Match(
+            "1", "2026-09-25", "15:30", "India", "Pakistan",
+            "ODI", "Lahore", "Upcoming", "Pakistan tour of India 2024"
+        )
+        assert filter_obj.is_top15_nation_match(top15_vs_top15) == True
+
+        top15_vs_non_top15 = Match(
+            "2", "2026-09-25", "15:30", "India", "Nepal",
+            "ODI", "Lahore", "Upcoming", "Nepal tour of India 2024"
+        )
+        assert filter_obj.is_top15_nation_match(top15_vs_non_top15) == False
+
+        # Franchise leagues are exempt from the nation-ranking check - their
+        # "teams" are city/franchise sides, not nations.
+        major_league_t20 = Match(
+            "3", "2026-09-25", "15:30", "Mumbai Indians", "Chennai Super Kings",
+            "T20", "Wankhede Stadium", "Upcoming", "Indian Premier League 2026"
+        )
+        assert filter_obj.is_top15_nation_match(major_league_t20) == True
+
+        # Alias spellings (e.g. "USA" for "United States") should still match
+        usa_alias = Match(
+            "4", "2026-09-25", "15:30", "India", "USA",
+            "ODI", "Lahore", "Upcoming", "USA tour of India 2024"
+        )
+        assert filter_obj.is_top15_nation_match(usa_alias) == True
+
     def test_filter_matches(self):
         """Test filtering a list of matches"""
         today = datetime.now().date()

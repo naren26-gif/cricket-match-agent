@@ -6,7 +6,7 @@ the image spec this implements.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -19,8 +19,11 @@ logger = setup_logger(__name__)
 LANDSCAPE_SIZE = (1200, 628)
 SQUARE_SIZE = (1080, 1080)
 
-MIN_FEATURED_MATCHES = 5
-MAX_FEATURED_MATCHES = 7
+# The image features every match in the next FEATURED_WINDOW_DAYS days
+# (today inclusive), capped at MAX_FEATURED_MATCHES so a busy week's rows
+# don't shrink to illegible slivers on the fixed-size image.
+FEATURED_WINDOW_DAYS = 7
+MAX_FEATURED_MATCHES = 15
 
 COLOR_BG = "#0F1729"
 COLOR_CARD = "#1B2740"
@@ -45,13 +48,14 @@ def load_matches(path=None):
         return json.load(f)
 
 
-def select_featured_matches(matches, min_count=MIN_FEATURED_MATCHES, max_count=MAX_FEATURED_MATCHES):
+def select_featured_matches(matches, days_ahead=FEATURED_WINDOW_DAYS, max_count=MAX_FEATURED_MATCHES):
     """
-    Pick the 5-7 matches to feature in this week's image: confirmed
-    fixtures only, sorted chronologically. Franchise leagues often list
-    playoff/qualifier slots as "Tbc vs Tbc" before teams are decided -
-    those are excluded unless there aren't enough confirmed matches to
-    reach min_count, in which case they're used to pad the image out.
+    Feature every match scheduled in the next `days_ahead` days (today
+    inclusive), sorted chronologically, capped at max_count for legibility
+    on the fixed-size image. Franchise leagues often list playoff/qualifier
+    slots as "Tbc vs Tbc" before teams are decided - those are excluded
+    unless there are no confirmed matches in the window, in which case
+    they're used instead so the image isn't empty.
     """
     def is_confirmed(m):
         return (
@@ -62,12 +66,24 @@ def select_featured_matches(matches, min_count=MIN_FEATURED_MATCHES, max_count=M
     def sort_key(m):
         return (m.get("date") or "", m.get("time") or "")
 
-    confirmed = sorted((m for m in matches if is_confirmed(m)), key=sort_key)
-    if len(confirmed) >= min_count:
+    today = datetime.now(timezone.utc).date()
+    cutoff = today + timedelta(days=days_ahead)
+
+    def in_window(m):
+        try:
+            match_date = datetime.strptime(m.get("date") or "", "%Y-%m-%d").date()
+        except ValueError:
+            return False
+        return today <= match_date <= cutoff
+
+    upcoming = [m for m in matches if in_window(m)]
+
+    confirmed = sorted((m for m in upcoming if is_confirmed(m)), key=sort_key)
+    if confirmed:
         return confirmed[:max_count]
 
-    placeholders = sorted((m for m in matches if not is_confirmed(m)), key=sort_key)
-    return (confirmed + placeholders)[:max_count]
+    placeholders = sorted((m for m in upcoming if not is_confirmed(m)), key=sort_key)
+    return placeholders[:max_count]
 
 
 def _normalize_format(fmt):
