@@ -45,7 +45,7 @@ leagues (unless specified), youth cricket, and women's cricket (unless
 explicitly requested).
 
 ## Current status
-_Last updated: 2026-09-04._
+_Last updated: 2026-09-05._
 
 **Data source changed: ESPNCricinfo scraping abandoned, replaced with the
 CricketData.org (CricAPI) JSON API.** ESPNCricinfo sits behind Akamai's
@@ -88,13 +88,29 @@ and Phase 4 (GitHub Actions automation) are done:
   secret for the weekly workflow. Full details in `ARCHITECTURE.md` →
   "Automation (live)".
 
+Phase 3 (image generator) is now done:
+- `src/image_generator.py` — renders landscape (1200×628) and square
+  (1080×1080) images per the spec in `src/CLAUDE.md`: 5-7 featured
+  matches, color-coded format badge, venue, UTC time. Uses Pillow's
+  built-in `ImageFont.load_default(size=...)` (embeds its own scalable
+  font data) rather than a system/truetype font path, so rendering is
+  identical on a bare CI runner or the Docker image with no font install
+  step. `select_featured_matches()` drops unconfirmed "Tbc vs Tbc"
+  fixtures (common for franchise-league playoff slots not yet decided),
+  falling back to including them only if there aren't enough confirmed
+  matches to reach the minimum. Wired into `main.py` as Step 4, run right
+  after `matches.json` is saved.
+- `tests/test_image_generator.py` — unit tests for the selection/format/
+  truncation helpers and an end-to-end `generate_images()` check (PNG
+  dimensions + filename convention), writing to `tmp_path` rather than
+  the real `output/` dir. Runs in CI along with the rest of the suite —
+  see `ARCHITECTURE.md` → "Automation (live)" for `ci.yml`.
+
 Not started yet:
-- `src/image_generator.py` — **empty file**, Phase 3 not begun (landscape
-  1200×628 + square 1080×1080 templates, spec in `src/CLAUDE.md`)
 - Manual/automated social upload workflow (Phase 5)
 
-Next logical action: build `src/image_generator.py` (Phase 3) now that
-`output/matches.json` is populated with real data end-to-end.
+Next logical action: Phase 5 — manual social upload workflow (or start
+Phase 6 test-coverage hardening across the whole pipeline).
 
 ## Standing instructions from the user
 _Append new durable instructions here, most recent first, as they're given

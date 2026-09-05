@@ -8,6 +8,7 @@ from datetime import datetime
 
 from src.scraper import fetch_matches
 from src.parser import filter_international_matches
+from src.image_generator import generate_images
 from config.settings import MATCHES_JSON_FILE
 from src.logger_setup import setup_logger
 
@@ -20,6 +21,7 @@ def main():
     1. Fetch matches from CricketData.org
     2. Filter for international matches only
     3. Save to JSON file
+    4. Generate shareable images (landscape + square)
     """
     
     logger.info("🏏 Cricket Match Agent Starting...")
@@ -47,13 +49,25 @@ def main():
     logger.info("Step 3: Saving matches to JSON...")
     success = save_matches_to_json(filtered_matches)
     
-    if success:
-        logger.info(f"Step 3 Complete: Saved to {MATCHES_JSON_FILE}")
-        logger.info("🏏 Cricket Match Agent Completed Successfully!")
-        return True
-    else:
+    if not success:
         logger.error("Failed to save matches")
         return False
+
+    logger.info(f"Step 3 Complete: Saved to {MATCHES_JSON_FILE}")
+
+    # Step 4: Generate shareable images (landscape + square) from the
+    # matches.json file Step 3 just wrote
+    logger.info("Step 4: Generating shareable images...")
+    images = generate_images()
+
+    if images:
+        landscape_path, square_path = images
+        logger.info(f"Step 4 Complete: Generated {landscape_path.name} and {square_path.name}")
+    else:
+        logger.warning("Step 4: No images generated (no matches to feature)")
+
+    logger.info("🏏 Cricket Match Agent Completed Successfully!")
+    return True
 
 
 def save_matches_to_json(matches):

@@ -17,6 +17,12 @@ This file is auto-loaded by Claude Code whenever it works on files under
 - `test_cricapi_scrape_output.py` — (renamed from
   `test_espn_scrape_output.py`) rewritten against sample CricAPI-shaped
   JSON records instead of ESPN HTML fixtures.
+- `test_image_generator.py` — covers Phase 3 (`src/image_generator.py`):
+  featured-match selection (placeholder filtering/padding, chronological
+  sort, min/max cap), the format/date/truncation render helpers, and
+  `generate_images()` end-to-end (writes to `tmp_path`, not the real
+  `output/` dir — asserts PNG dimensions and the
+  `cricket_matches_week_XX_*.png` filename convention).
 
 ## CI
 Every push/PR to `main` runs this whole suite via `.github/workflows/ci.yml`
